@@ -20,6 +20,7 @@ LDFLAGS = -T $(KERNEL_DIR)/linker.ld -nostdlib -melf_i386
 BOOTLOADER = $(BUILD_DIR)/boot.bin
 KERNEL = $(BUILD_DIR)/kernel.bin
 OS_IMAGE = $(BUILD_DIR)/os.img
+USB_IMAGE = $(BUILD_DIR)/phantom_usb.img
 
 # Object files
 KERNEL_ASM_OBJ = $(BUILD_DIR)/kernel_entry.o
@@ -27,7 +28,7 @@ KERNEL_INTERRUPTS_OBJ = $(BUILD_DIR)/interrupts.o
 KERNEL_C_OBJ = $(BUILD_DIR)/kernel.o
 KERNEL_FS_OBJ = $(BUILD_DIR)/filesystem.o
 
-.PHONY: all clean run
+.PHONY: all clean run usb-image
 
 all: $(OS_IMAGE)
 
@@ -68,6 +69,35 @@ $(OS_IMAGE): $(BOOTLOADER) $(KERNEL) | $(BUILD_DIR)
 	# Write kernel starting at sector 2
 	dd if=$(KERNEL) of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null
 
+# Create USB-bootable image (8MB for USB compatibility)
+$(USB_IMAGE): $(BOOTLOADER) $(KERNEL) | $(BUILD_DIR)
+	# Create 8MB USB image
+	dd if=/dev/zero of=$@ bs=1024 count=8192 2>/dev/null
+	# Write bootloader to first sector (MBR)
+	dd if=$(BOOTLOADER) of=$@ bs=512 count=1 conv=notrunc 2>/dev/null
+	# Write kernel starting at sector 2
+	dd if=$(KERNEL) of=$@ bs=512 seek=1 conv=notrunc 2>/dev/null
+
+# Build USB image
+usb-image: $(USB_IMAGE)
+	@echo "====================================================="
+	@echo "✅ USB-bootable PhantomOS image created!"
+	@echo "====================================================="
+	@echo "Image file: $(USB_IMAGE)"
+	@echo "Size: 8MB (USB compatible)"
+	@echo ""
+	@echo "🔥 WRITE TO USB DRIVE (REPLACE /dev/sdX WITH YOUR USB!):"
+	@echo "sudo dd if=$(USB_IMAGE) of=/dev/sdX bs=4M status=progress"
+	@echo ""
+	@echo "⚠️  WARNING: This will DESTROY all data on the USB drive!"
+	@echo "⚠️  Make sure /dev/sdX is your USB drive (check with 'lsblk')"
+	@echo ""
+	@echo "🖥️  BOOT FROM USB:"
+	@echo "1. Insert USB drive into target computer"
+	@echo "2. Boot and select USB in BIOS/UEFI boot menu"
+	@echo "3. PhantomOS should load with interactive shell"
+	@echo "====================================================="
+
 clean:
 	rm -rf $(BUILD_DIR)
 
@@ -79,6 +109,10 @@ run: $(OS_IMAGE)
 run-console: $(OS_IMAGE)
 	qemu-system-x86_64 -drive format=raw,file=$(OS_IMAGE),if=ide,index=0 -serial stdio -display none
 
+# Test USB image in QEMU (simulates USB boot)
+test-usb: $(USB_IMAGE)
+	qemu-system-x86_64 -drive format=raw,file=$(USB_IMAGE),if=ide,index=0 -display gtk -no-reboot
+
 # Debug with QEMU (enables GDB)
 debug: $(OS_IMAGE)
 	qemu-system-x86_64 -drive format=raw,file=$(OS_IMAGE),if=ide,index=0 -s -S -no-reboot
@@ -89,5 +123,6 @@ info:
 	@echo "  Bootloader: $(BOOTLOADER)"
 	@echo "  Kernel: $(KERNEL)"
 	@echo "  OS Image: $(OS_IMAGE)"
+	@echo "  USB Image: $(USB_IMAGE)"
 	@echo "  Build directory: $(BUILD_DIR)"
 	
