@@ -261,39 +261,31 @@ void idt_set_entry(int num, uint32_t handler, uint16_t selector, uint8_t type_at
 
 // Keyboard interrupt handler (called from assembly)
 void keyboard_handler(void) {
-	char * vga = (char*)0xB8000;
-	vga[2] = 'K';
-	vga[3] = 0x0c;
+    uint8_t scancode = inb(KEYBOARD_DATA_PORT);
 
-	outb(0x20,0x20);
-   // uint8_t scancode = inb(KEYBOARD_DATA_PORT);
-    
-    // Only handle key presses (not releases)
-    //if (!(scancode & 0x80)) {
-     //   if (scancode < sizeof(scancode_to_ascii) && scancode_to_ascii[scancode] != 0) {
-      //      char ascii = scancode_to_ascii[scancode];
-            
-       //     if (ascii == '\n') {
-                // Process command
-        //        terminal_putchar('\n');
-         //       input_buffer[input_length] = '\0';
-          //      process_command(input_buffer);
-           //     input_length = 0;
-            //    shell_prompt();
-            //} else if (scancode == 0x0E) { // Backspace
-             //   if (input_length > 0) {
-              //      input_length--;
-               //     terminal_putchar('\b');
-                //}
-            //} else if (input_length < sizeof(input_buffer) - 1) {
-             //   input_buffer[input_length++] = ascii;
-              //  terminal_putchar(ascii);
-//            }
- //       }
-  //  }
-    
-    // Send End of Interrupt to PIC
-   // outb(0x20, 0x20);
+    if (!(scancode & 0x80)) {  // Key press only
+        if (scancode < sizeof(scancode_to_ascii) && scancode_to_ascii[scancode] != 0) {
+            char ascii = scancode_to_ascii[scancode];
+
+            if (ascii == '\n') {
+                terminal_putchar('\n');
+                input_buffer[input_length] = '\0';
+                process_command(input_buffer);
+                input_length = 0;
+                shell_prompt();
+            } else if (scancode == 0x0E) { // Backspace
+                if (input_length > 0) {
+                    input_length--;
+                    terminal_putchar('\b');
+                }
+            } else if (input_length < sizeof(input_buffer) - 1) {
+                input_buffer[input_length++] = ascii;
+                terminal_putchar(ascii);
+            }
+        }
+    }
+
+    outb(0x20, 0x20);  // End of interrupt to PIC
 }
 
 // Parse command into command and arguments
