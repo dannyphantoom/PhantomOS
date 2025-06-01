@@ -11,7 +11,7 @@ KERNEL_DIR = src/kernel
 BUILD_DIR = build
 
 # Compiler flags for kernel (32-bit, no standard library)
-CFLAGS = -m32 -ffreestanding -fno-stack-protector -fno-builtin -nostdlib -nostdinc
+CFLAGS = -m32 -ffreestanding -fno-stack-protector -fno-builtin -nostdlib -nostdinc -fno-pie -fno-pic
 
 # Linker flags
 LDFLAGS = -T $(KERNEL_DIR)/linker.ld -nostdlib -melf_i386
@@ -58,7 +58,7 @@ $(KERNEL_FS_OBJ): $(KERNEL_DIR)/filesystem.c | $(BUILD_DIR)
 
 # Link kernel (full version with file system, 32-bit)
 $(KERNEL): $(KERNEL_ASM_OBJ) $(KERNEL_INTERRUPTS_OBJ) $(KERNEL_C_OBJ) $(KERNEL_FS_OBJ) $(KERNEL_DIR)/linker.ld | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) -o $@ $(KERNEL_ASM_OBJ) $(KERNEL_INTERRUPTS_OBJ) $(KERNEL_C_OBJ) $(KERNEL_FS_OBJ)
+	$(LD) $(LDFLAGS) -o $@ $(KERNEL_ASM_OBJ) $(KERNEL_INTERRUPTS_OBJ) $(KERNEL_C_OBJ) $(KERNEL_FS_OBJ) --oformat binary
 
 # Create OS image (bootloader + kernel)
 $(OS_IMAGE): $(BOOTLOADER) $(KERNEL) | $(BUILD_DIR)

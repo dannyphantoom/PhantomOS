@@ -1,6 +1,6 @@
 # PhantomOS
 
-![PhantomOS Logo](https://img.shields.io/badge/PhantomOS-v0.3-blue?style=for-the-badge)
+![PhantomOS Logo](https://img.shields.io/badge/PhantomOS-v0.3.1-blue?style=for-the-badge)
 ![Architecture](https://img.shields.io/badge/Architecture-32--bit-green?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
@@ -72,8 +72,8 @@ make all
 # Run in QEMU
 make run
 
-# Run in console mode (serial output)
-make run-console
+# Test keyboard functionality
+./test_keyboard.sh
 
 # Clean build files
 make clean
@@ -98,7 +98,23 @@ Type 'help' for available commands.
 phantom:/$ 
 ```
 
-## 🛠️ Technical Architecture
+## 🛠️ Recent Fixes (v0.3.1)
+
+### Compilation Errors Fixed
+- **Linker Flag**: Corrected `-oformat` to `--oformat` in Makefile
+- **PIC Issues**: Added `-fno-pie -fno-pic` flags to prevent position-independent code generation
+
+### Keyboard Input Fixed
+- **PS/2 Controller**: Improved initialization sequence with proper status checks
+- **Initialization Order**: IDT is now set up before keyboard initialization
+- **Interrupt Handling**: Enhanced keyboard interrupt handler
+- **Debug Output**: Removed debug characters that interfered with input
+
+### Documentation Added
+- **Troubleshooting Guide**: See `KEYBOARD_TROUBLESHOOTING.md` for keyboard issues
+- **Test Script**: `test_keyboard.sh` for easy keyboard testing
+
+## 🔧 Technical Architecture
 
 ### Boot Process
 1. **BIOS** loads 512-byte bootloader from sector 1
@@ -139,7 +155,9 @@ phantom:/$
 ```
 PhantomOS/
 ├── README.md                    # This file
+├── KEYBOARD_TROUBLESHOOTING.md  # Keyboard debugging guide
 ├── Makefile                     # Build system
+├── test_keyboard.sh             # Keyboard test script
 ├── src/
 │   ├── bootloader/
 │   │   └── boot_simple.asm      # 32-bit bootloader
@@ -156,56 +174,6 @@ PhantomOS/
     ├── kernel.bin               # Compiled kernel
     └── os.img                   # Final OS image
 ```
-
-## 🔧 Development Journey & Fixes
-
-### Original Problem
-The initial boot process was failing with:
-> "*qemu starts and prints phantom Os is loading... but then afterwards it immediately closes*"
-
-### Root Causes Identified & Resolved
-
-#### 1. **Kernel Size Issue** ✅ FIXED
-- **Problem**: 23.8KB kernel but bootloader only loaded 16KB
-- **Solution**: Increased bootloader capacity to 32KB (64 sectors)
-
-#### 2. **Complex 64-bit Transition** ✅ FIXED  
-- **Problem**: Original bootloader attempted complex 16→32→64 bit transitions causing infinite reboot loops
-- **Solution**: Simplified to stable 16→32 bit transition, eliminated 64-bit complexity
-
-#### 3. **Memory Addressing Bug** ✅ FIXED
-- **Problem**: Bootloader jumped to `0x100000` but kernel entry point was at `0x101000` due to ELF header offset
-- **Solution**: Fixed bootloader to jump to correct address accounting for ELF structure
-
-#### 4. **Disk Interface Issues** ✅ FIXED
-- **Problem**: Unreliable floppy disk emulation causing read errors
-- **Solution**: Switched to hard drive interface (`0x80`) with retry logic
-
-#### 5. **Keyboard Not Responding After Boot** ✅ FIXED
-- **Problem**: Kernel enabled interrupts but never activated the PS/2 controller
-  so no IRQ1 events were generated.
-- **Solution**: Added `keyboard_init()` to enable the first PS/2 port and start
-  keyboard scanning before loading the IDT.
-
-### Version History
-
-**v0.3 (Current)** - 32-bit Stable Release
-- ✅ Fixed all boot issues
-- ✅ 32-bit protected mode kernel
-- ✅ Full POSIX file system
-- ✅ Interactive shell with keyboard input
-- ✅ Reliable disk loading
-
-**v0.2** - 64-bit Experimental (Deprecated)
-- ❌ Complex 64-bit transition causing boot loops
-- ❌ Unreliable kernel loading
-- ✅ POSIX file system implementation
-- ✅ Shell command framework
-
-**v0.1** - Initial Implementation  
-- ❌ Basic bootloader with boot failures
-- ✅ Simple "Hello World" kernel
-- ❌ No file system
 
 ## 🎮 Usage Examples
 
@@ -249,6 +217,7 @@ phantom:/projects/test$ pwd       # Show full path
 - **Single Tasking**: No multitasking or process management
 - **Basic Memory Management**: Simple allocator without deallocation
 - **Limited Hardware Support**: VGA text mode only, no graphics
+- **Basic Keyboard**: US QWERTY layout only, no shift/caps lock
 
 ## 🔮 Future Enhancements
 
@@ -258,7 +227,7 @@ phantom:/projects/test$ pwd       # Show full path
 - [ ] **Virtual Memory**: Paging and memory protection
 - [ ] **Network Stack**: Basic TCP/IP implementation
 - [ ] **Graphics Mode**: VESA framebuffer support
-- [ ] **Device Drivers**: USB, sound, ethernet support
+- [ ] **Enhanced Keyboard**: Full keyboard support with modifiers
 
 ## 🤝 Contributing
 

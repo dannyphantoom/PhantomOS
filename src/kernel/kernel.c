@@ -101,11 +101,59 @@ static inline void io_wait(void) {
 
 // Enable PS/2 keyboard and start scanning
 static void keyboard_init(void) {
+    // Wait for input buffer to be clear
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02)
+        io_wait();
+    
+    // Disable devices
+    outb(KEYBOARD_STATUS_PORT, 0xAD);  // Disable first PS/2 port
     io_wait();
-    outb(0x64, 0xAE); // enable first PS/2 port
+    outb(KEYBOARD_STATUS_PORT, 0xA7);  // Disable second PS/2 port (if exists)
     io_wait();
-    outb(0x60, 0xF4); // enable scanning
-    io_wait();       // wait for command to complete
+    
+    // Flush output buffer
+    while (inb(KEYBOARD_STATUS_PORT) & 0x01) {
+        inb(KEYBOARD_DATA_PORT);
+        io_wait();
+    }
+    
+    // Set controller configuration byte
+    outb(KEYBOARD_STATUS_PORT, 0x20);  // Read configuration byte
+    io_wait();
+    uint8_t config = inb(KEYBOARD_DATA_PORT);
+    config |= 0x01;  // Enable IRQ1
+    config &= ~0x10; // Enable clock for first PS/2 port
+    
+    outb(KEYBOARD_STATUS_PORT, 0x60);  // Write configuration byte
+    io_wait();
+    outb(KEYBOARD_DATA_PORT, config);
+    io_wait();
+    
+    // Enable first PS/2 port
+    outb(KEYBOARD_STATUS_PORT, 0xAE);
+    io_wait();
+    
+    // Reset keyboard
+    outb(KEYBOARD_DATA_PORT, 0xFF);
+    io_wait();
+    
+    // Wait for ACK and self-test result
+    while (!(inb(KEYBOARD_STATUS_PORT) & 0x01))
+        io_wait();
+    inb(KEYBOARD_DATA_PORT);  // Read ACK (0xFA)
+    
+    while (!(inb(KEYBOARD_STATUS_PORT) & 0x01))
+        io_wait();
+    inb(KEYBOARD_DATA_PORT);  // Read self-test result (0xAA)
+    
+    // Enable scanning
+    outb(KEYBOARD_DATA_PORT, 0xF4);
+    io_wait();
+    
+    // Wait for ACK
+    while (!(inb(KEYBOARD_STATUS_PORT) & 0x01))
+        io_wait();
+    inb(KEYBOARD_DATA_PORT);  // Read ACK
 }
 
 // Helper function to create VGA entry
@@ -276,7 +324,7 @@ void idt_set_entry(int num, uint32_t handler, uint16_t selector, uint8_t type_at
 void keyboard_handler(void) {
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
 
-    if (!(scancode & 0x80)) {  // Key press only
+    if (!(scancode & 0x80)) {  // Key press only (ignore key release)
         if (scancode < sizeof(scancode_to_ascii) && scancode_to_ascii[scancode] != 0) {
             char ascii = scancode_to_ascii[scancode];
 
@@ -286,14 +334,14 @@ void keyboard_handler(void) {
                 process_command(input_buffer);
                 input_length = 0;
                 shell_prompt();
-            } else if (scancode == 0x0E) { // Backspace
-                if (input_length > 0) {
-                    input_length--;
-                    terminal_putchar('\b');
-                }
             } else if (input_length < sizeof(input_buffer) - 1) {
                 input_buffer[input_length++] = ascii;
                 terminal_putchar(ascii);
+            }
+        } else if (scancode == 0x0E) { // Backspace scancode
+            if (input_length > 0) {
+                input_length--;
+                terminal_putchar('\b');
             }
         }
     }
@@ -410,7 +458,9 @@ void process_command(const char* command) {
         terminal_writestring(": command not found\n");
     }
 }
+
 void init_idt(void) {
+    terminal_putchar('I'); // Debug: show IDT setup started
     // Remap PIC
     outb(0x20, 0x11);
     outb(0xA0, 0x11);
@@ -427,27 +477,26 @@ void init_idt(void) {
     outb(0x21, 0xFD);  // enable only keyboard (bit 1 cleared)
 
     // ✅ Now install IDT entry AFTER remapping
-    idt_set_entry(0x21, (uint32_t)keyboard_interrupt_handler, KERNEL_CODE_SEGMENT_OFFSET, 0x8E);
+    idt_set_entry(0x20, (uint32_t)keyboard_interrupt_handler, KERNEL_CODE_SEGMENT_OFFSET, 0x8E); // Timer IRQ0
+    idt_set_entry(0x21, (uint32_t)keyboard_interrupt_handler, KERNEL_CODE_SEGMENT_OFFSET, 0x8E); // Keyboard IRQ1
     idt_pointer.limit = sizeof(idt) - 1;
     idt_pointer.base = (uint32_t)&idt;
     asm volatile ("lidt %0" : : "m"(idt_pointer));
+    terminal_putchar('L'); // Debug: show IDT loaded
 
-	uint8_t m = inb(0x21);
-	char* vga = (char*)0xB8000;
-	vga[4] = '0' + ((m & (1 << 1)) ? 1 : 0);  // Show IRQ1 masked/unmasked
-	vga[5] = 0x0F;
+    uint8_t m = inb(0x21);
+    char* vga = (char*)0xB8000;
+    vga[4] = '0' + ((m & (1 << 1)) ? 1 : 0);  // Show IRQ1 masked/unmasked
+    vga[5] = 0x0F;
 
     // Enable interrupts
     asm volatile ("sti");
-	
-	//dummy 
+    terminal_putchar('S'); // Debug: show STI (interrupts enabled)
 
-	vga[0] = 'S';
-	vga[1] = 0x0F;
-
+    vga[0] = 'S';
+    vga[1] = 0x0F;
 }
 
-	
 // Basic shell prompt with current directory
 void shell_prompt(void) {
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
@@ -487,9 +536,9 @@ void kernel_main(void) {
     // Initialize file system
     fs_init();
 
-    // Enable keyboard and interrupts
-    keyboard_init();
+    // Enable interrupts first, then keyboard
     init_idt();
+    keyboard_init();
     
     // Start the shell
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BROWN, VGA_COLOR_BLACK));

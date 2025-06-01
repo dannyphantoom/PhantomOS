@@ -21,6 +21,11 @@ SECTIONS
         *(.data)
         *(.data.*)
     }
+
+    /* GDT section (must be loaded in memory) */
+    .gdt ALIGN(8) : {
+        *(.gdt)
+    }
     
     .bss ALIGN(4K) : {
         __bss_start = .;
