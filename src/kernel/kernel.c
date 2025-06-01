@@ -261,34 +261,39 @@ void idt_set_entry(int num, uint32_t handler, uint16_t selector, uint8_t type_at
 
 // Keyboard interrupt handler (called from assembly)
 void keyboard_handler(void) {
-    uint8_t scancode = inb(KEYBOARD_DATA_PORT);
+	char * vga = (char*)0xB8000;
+	vga[2] = 'K';
+	vga[3] = 0x0c;
+
+	outb(0x20,0x20);
+   // uint8_t scancode = inb(KEYBOARD_DATA_PORT);
     
     // Only handle key presses (not releases)
-    if (!(scancode & 0x80)) {
-        if (scancode < sizeof(scancode_to_ascii) && scancode_to_ascii[scancode] != 0) {
-            char ascii = scancode_to_ascii[scancode];
+    //if (!(scancode & 0x80)) {
+     //   if (scancode < sizeof(scancode_to_ascii) && scancode_to_ascii[scancode] != 0) {
+      //      char ascii = scancode_to_ascii[scancode];
             
-            if (ascii == '\n') {
+       //     if (ascii == '\n') {
                 // Process command
-                terminal_putchar('\n');
-                input_buffer[input_length] = '\0';
-                process_command(input_buffer);
-                input_length = 0;
-                shell_prompt();
-            } else if (scancode == 0x0E) { // Backspace
-                if (input_length > 0) {
-                    input_length--;
-                    terminal_putchar('\b');
-                }
-            } else if (input_length < sizeof(input_buffer) - 1) {
-                input_buffer[input_length++] = ascii;
-                terminal_putchar(ascii);
-            }
-        }
-    }
+        //        terminal_putchar('\n');
+         //       input_buffer[input_length] = '\0';
+          //      process_command(input_buffer);
+           //     input_length = 0;
+            //    shell_prompt();
+            //} else if (scancode == 0x0E) { // Backspace
+             //   if (input_length > 0) {
+              //      input_length--;
+               //     terminal_putchar('\b');
+                //}
+            //} else if (input_length < sizeof(input_buffer) - 1) {
+             //   input_buffer[input_length++] = ascii;
+              //  terminal_putchar(ascii);
+//            }
+ //       }
+  //  }
     
     // Send End of Interrupt to PIC
-    outb(0x20, 0x20);
+   // outb(0x20, 0x20);
 }
 
 // Parse command into command and arguments
@@ -400,39 +405,45 @@ void process_command(const char* command) {
         terminal_writestring(": command not found\n");
     }
 }
-
-// Initialize IDT
 void init_idt(void) {
-    // Set up keyboard interrupt (IRQ1 = INT 0x21)
+    // Remap PIC
+    outb(0x20, 0x11);
+    outb(0xA0, 0x11);
+    outb(0x21, 0x20);
+    outb(0xA1, 0x28);
+    outb(0x21, 0x04);
+    outb(0xA1, 0x02);
+    outb(0x21, 0x01);
+    outb(0xA1, 0x01);
+
+    // Mask IRQ0 (timer), unmask IRQ1 (keyboard)
+    uint8_t mask = inb(0x21);
+    mask |= (1 << 0);
+    mask &= ~(1 << 1);
+    outb(0x21, mask);
+
+    // ✅ Now install IDT entry AFTER remapping
     idt_set_entry(0x21, (uint32_t)keyboard_interrupt_handler, KERNEL_CODE_SEGMENT_OFFSET, 0x8E);
-    
-    // Set up IDT pointer
     idt_pointer.limit = sizeof(idt) - 1;
     idt_pointer.base = (uint32_t)&idt;
-    
-    // Load IDT
     asm volatile ("lidt %0" : : "m"(idt_pointer));
-    
+
+	uint8_t m = inb(0x21);
+	char* vga = (char*)0xB8000;
+	vga[4] = '0' + ((m & (1 << 1)) ? 1 : 0);  // Show IRQ1 masked/unmasked
+	vga[5] = 0x0F;
+
     // Enable interrupts
     asm volatile ("sti");
-    
-    // Initialize PIC (Programmable Interrupt Controller)
-    // Remap IRQs to start at interrupt 0x20
-    outb(0x20, 0x11); // Initialize PIC1
-    outb(0xA0, 0x11); // Initialize PIC2
-    outb(0x21, 0x20); // PIC1 offset (IRQ0-7 -> INT 0x20-0x27)
-    outb(0xA1, 0x28); // PIC2 offset (IRQ8-15 -> INT 0x28-0x2F)
-    outb(0x21, 0x04); // Tell PIC1 that PIC2 is at IRQ2
-    outb(0xA1, 0x02); // Tell PIC2 its cascade identity
-    outb(0x21, 0x01); // 8086 mode for PIC1
-    outb(0xA1, 0x01); // 8086 mode for PIC2
-    
-    // Enable keyboard interrupt (IRQ1)
-    uint8_t mask = inb(0x21);
-    mask &= ~(1 << 1); // Clear bit 1 (IRQ1)
-    outb(0x21, mask);
+	
+	//dummy 
+
+	vga[0] = 'S';
+	vga[1] = 0x0F;
+
 }
 
+	
 // Basic shell prompt with current directory
 void shell_prompt(void) {
     terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK));
@@ -447,6 +458,12 @@ void shell_prompt(void) {
 
 // Main kernel entry point
 void kernel_main(void) {
+    char* video = (char*)0xB8000;
+    video[0] = 'Z';
+    video[1] = 0x0F;
+  
+
+
     // Initialize the terminal
     terminal_initialize();
     

@@ -155,7 +155,7 @@ protected_mode_start:
     rep movsd
     
     ; Jump to kernel entry point (accounting for ELF header offset)
-    jmp 0x101000
+    jmp 0x100000
 
 ; GDT for 32-bit protected mode
 gdt_start:
