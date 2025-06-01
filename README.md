@@ -181,6 +181,12 @@ The initial boot process was failing with:
 - **Problem**: Unreliable floppy disk emulation causing read errors
 - **Solution**: Switched to hard drive interface (`0x80`) with retry logic
 
+#### 5. **Keyboard Not Responding After Boot** ✅ FIXED
+- **Problem**: Kernel enabled interrupts but never activated the PS/2 controller
+  so no IRQ1 events were generated.
+- **Solution**: Added `keyboard_init()` to enable the first PS/2 port and start
+  keyboard scanning before loading the IDT.
+
 ### Version History
 
 **v0.3 (Current)** - 32-bit Stable Release
