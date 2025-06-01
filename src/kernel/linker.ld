@@ -23,9 +23,11 @@ SECTIONS
     }
     
     .bss ALIGN(4K) : {
+        __bss_start = .;
         *(COMMON)
         *(.bss)
         *(.bss.*)
+        __bss_end = .;
     }
     
     /* Mark the end of the kernel */

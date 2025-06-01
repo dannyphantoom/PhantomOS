@@ -2,6 +2,8 @@ bits 32
 
 global _start
 extern kernel_main
+extern __bss_start
+extern __bss_end
 
 section .text
 _start:
@@ -17,7 +19,15 @@ _start:
     mov gs, ax
     mov ss, ax
     
-    ; Clear direction flag
+    ; Zero the BSS segment
+    mov edi, __bss_start
+    mov ecx, __bss_end
+    sub ecx, edi
+    xor eax, eax
+    cld
+    rep stosb
+
+    ; Clear direction flag (already cleared but ensure)
     cld
     
     ; Call our C kernel main function
