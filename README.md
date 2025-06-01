@@ -1,6 +1,6 @@
 # PhantomOS
 
-![PhantomOS Logo](https://img.shields.io/badge/PhantomOS-v0.3.1-blue?style=for-the-badge)
+![PhantomOS Logo](https://img.shields.io/badge/PhantomOS-v0.4-blue?style=for-the-badge)
 ![Architecture](https://img.shields.io/badge/Architecture-32--bit-green?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
@@ -21,6 +21,7 @@ PhantomOS is a custom operating system that demonstrates:
 - **32-bit Protected Mode Kernel** - Stable, reliable architecture
 - **VGA Text Mode Output** - 80x25 color terminal display
 - **Keyboard Input Handling** - Real-time scancode to ASCII translation
+- **Multi-layout Keyboard Support** - German QWERTZ and US QWERTY layouts
 - **Interrupt System** - IDT setup with PIC configuration
 - **Memory Management** - Simple allocator with 64KB memory pool
 
@@ -46,6 +47,10 @@ All standard POSIX commands are supported:
 | `cp <src> <dest>` | Copy file |
 | `mv <src> <dest>` | Move/rename file |
 | `cat <file>` | Display file contents |
+| `write <file> <text>` | Write text to file |
+| `edit <file>` | Open vim-like text editor |
+| `vi <file>` | Alias for edit |
+| `kbd [de|us]` | Show/set keyboard layout |
 | `echo <text>` | Echo text to terminal |
 | `clear` | Clear screen |
 | `help` | Show available commands |
@@ -98,7 +103,19 @@ Type 'help' for available commands.
 phantom:/$ 
 ```
 
-## 🛠️ Recent Fixes (v0.3.1)
+## ��️ Recent Fixes (v0.4)
+
+### New Features
+- **German QWERTZ Keyboard Layout** - Default keyboard layout for German users
+- **US QWERTY Keyboard Layout** - Switch with `kbd us` command
+- **Uppercase Letter Support** - Full Shift key and Caps Lock functionality
+- **Vim-like Text Editor** - Built-in editor with modes (Normal, Insert, Command)
+
+### Keyboard Features
+- **Layout Switching**: Use `kbd de` or `kbd us` to switch layouts
+- **Shift Key**: Hold for uppercase letters and shifted symbols
+- **Caps Lock**: Toggle for continuous uppercase
+- **Special Characters**: Limited by ASCII (umlauts shown as regular letters)
 
 ### Compilation Errors Fixed
 - **Linker Flag**: Corrected `-oformat` to `--oformat` in Makefile
@@ -257,6 +274,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ### Recent Updates
 
+- **v0.4**: Added German/US keyboard layouts with full uppercase support
 - **Vim-like Text Editor**: Added a built-in text editor with vim-like keybindings
   - Commands: `edit filename` or `vi filename`
   - Modes: Normal, Insert, and Command modes

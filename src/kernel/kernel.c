@@ -57,13 +57,56 @@ static struct idt_ptr idt_pointer;
 static int editor_active = 0;
 static editor_state_t* current_editor = NULL;
 
-// US QWERTY scancode to ASCII translation table
+// Keyboard state
+static int shift_pressed = 0;
+static int caps_lock = 0;
+static int use_german_layout = 1; // Default to German layout
+
+// US QWERTY scancode to ASCII translation table - normal (unshifted)
 static char scancode_to_ascii[] = {
     0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 0, 0,
     'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n', 0,
     'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', 0, '\\',
     'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0, 0, 0, ' '
 };
+
+// US QWERTY scancode to ASCII translation table - shifted
+static char scancode_to_ascii_shift[] = {
+    0, 0, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', 0, 0,
+    'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n', 0,
+    'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~', 0, '|',
+    'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 0, 0, 0, ' '
+};
+
+// German QWERTZ keyboard layout - normal (unshifted)
+static char scancode_to_ascii_de[] = {
+    0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 's', '\'', 0, 0,
+    'q', 'w', 'e', 'r', 't', 'z', 'u', 'i', 'o', 'p', 'u', '+', '\n', 0,
+    'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'o', 'a', '^', 0, '#',
+    'y', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '-', 0, 0, 0, ' ',
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '<', 0, 0, 0, 0
+};
+
+// German QWERTZ keyboard layout - shifted
+static char scancode_to_ascii_de_shift[] = {
+    0, 0, '!', '"', '#', '$', '%', '&', '/', '(', ')', '=', '?', '`', 0, 0,
+    'Q', 'W', 'E', 'R', 'T', 'Z', 'U', 'I', 'O', 'P', 'U', '*', '\n', 0,
+    'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'O', 'A', '^', 0, '\'',
+    'Y', 'X', 'C', 'V', 'B', 'N', 'M', ';', ':', '_', 0, 0, 0, ' ',
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '>', 0, 0, 0, 0
+};
+
+// Note: Due to ASCII limitations:
+// - German umlauts (ä,ö,ü) are shown as a,o,u  
+// - ß (eszett) is shown as s
+// - § (section sign) is shown as #
+
+// Shift key scancodes
+#define SCANCODE_LEFT_SHIFT 0x2A
+#define SCANCODE_RIGHT_SHIFT 0x36
+#define SCANCODE_CAPS_LOCK 0x3A
 
 // I/O port functions
 static inline uint8_t inb(uint16_t port) {
@@ -304,22 +347,55 @@ void idt_set_entry(int num, uint32_t handler, uint16_t selector, uint8_t type_at
 // Keyboard interrupt handler (called from assembly)
 void keyboard_handler(void) {
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
+    int key_released = scancode & 0x80;
+    scancode &= 0x7F; // Get the actual scancode without release bit
+    
+    // Track shift key state
+    if (scancode == SCANCODE_LEFT_SHIFT || scancode == SCANCODE_RIGHT_SHIFT) {
+        shift_pressed = !key_released;
+        outb(0x20, 0x20);  // End of interrupt to PIC
+        return;
+    }
+    
+    // Track caps lock (toggle on press)
+    if (scancode == SCANCODE_CAPS_LOCK && !key_released) {
+        caps_lock = !caps_lock;
+        outb(0x20, 0x20);  // End of interrupt to PIC
+        return;
+    }
 
     // If editor is active, redirect input to editor
     if (editor_active && current_editor) {
-        char ascii = 0;
-        if (!(scancode & 0x80) && scancode < sizeof(scancode_to_ascii)) {
-            ascii = scancode_to_ascii[scancode];
-        }
-        
-        editor_process_key(current_editor, ascii, scancode);
-        
-        // Check if editor wants to exit
-        if (current_editor->mode == -1) {
-            editor_active = 0;
-            current_editor = NULL;
-            terminal_clear();
-            shell_prompt();
+        // Only process key press events (ignore releases)
+        if (!key_released) {
+            char ascii = 0;
+            if (scancode < sizeof(scancode_to_ascii_de)) {
+                // Use selected keyboard layout
+                if (use_german_layout) {
+                    ascii = shift_pressed ? scancode_to_ascii_de_shift[scancode] : scancode_to_ascii_de[scancode];
+                } else {
+                    ascii = shift_pressed ? scancode_to_ascii_shift[scancode] : scancode_to_ascii[scancode];
+                }
+                
+                // Apply caps lock for letters
+                if (caps_lock && ascii >= 'a' && ascii <= 'z') {
+                    ascii = ascii - 'a' + 'A';
+                }
+            }
+            
+            // Pass both ASCII character and raw scancode to editor
+            editor_process_key(current_editor, ascii, scancode);
+            
+            // Force redraw after each key
+            editor_draw(current_editor);
+            
+            // Check if editor wants to exit
+            if (current_editor->mode == -1) {
+                editor_active = 0;
+                current_editor = NULL;
+                terminal_clear();
+                shell_prompt();
+            }
         }
         
         outb(0x20, 0x20);  // End of interrupt to PIC
@@ -327,19 +403,32 @@ void keyboard_handler(void) {
     }
 
     // Normal shell input processing
-    if (!(scancode & 0x80)) {  // Key press only (ignore key release)
-        if (scancode < sizeof(scancode_to_ascii) && scancode_to_ascii[scancode] != 0) {
-            char ascii = scancode_to_ascii[scancode];
-
-            if (ascii == '\n') {
-                terminal_putchar('\n');
-                input_buffer[input_length] = '\0';
-                process_command(input_buffer);
-                input_length = 0;
-                shell_prompt();
-            } else if (input_length < sizeof(input_buffer) - 1) {
-                input_buffer[input_length++] = ascii;
-                terminal_putchar(ascii);
+    if (!key_released) {  // Key press only (ignore key release)
+        if (scancode < sizeof(scancode_to_ascii_de)) {
+            char ascii;
+            // Use selected keyboard layout
+            if (use_german_layout) {
+                ascii = shift_pressed ? scancode_to_ascii_de_shift[scancode] : scancode_to_ascii_de[scancode];
+            } else {
+                ascii = shift_pressed ? scancode_to_ascii_shift[scancode] : scancode_to_ascii[scancode];
+            }
+            
+            // Apply caps lock for letters
+            if (caps_lock && ascii >= 'a' && ascii <= 'z') {
+                ascii = ascii - 'a' + 'A';
+            }
+            
+            if (ascii != 0) {
+                if (ascii == '\n') {
+                    terminal_putchar('\n');
+                    input_buffer[input_length] = '\0';
+                    process_command(input_buffer);
+                    input_length = 0;
+                    shell_prompt();
+                } else if (input_length < sizeof(input_buffer) - 1) {
+                    input_buffer[input_length++] = ascii;
+                    terminal_putchar(ascii);
+                }
             }
         } else if (scancode == 0x0E) { // Backspace scancode
             if (input_length > 0) {
@@ -446,13 +535,14 @@ void process_command(const char* command) {
         terminal_writestring("  tree [dir]   - Show directory tree\n");
         terminal_writestring("  edit <file>  - Edit file in text editor\n");
         terminal_writestring("  vi <file>    - Edit file (alias for edit)\n");
+        terminal_writestring("  kbd <layout> - Set keyboard layout (de/us)\n");
         
     } else if (strcmp(cmd, "clear") == 0) {
         terminal_clear();
         
     } else if (strcmp(cmd, "version") == 0) {
-        terminal_writestring("PhantomOS v0.3 - 32-bit Kernel with POSIX File System\n");
-        terminal_writestring("Fixed bootloader, working keyboard input\n");
+        terminal_writestring("PhantomOS v0.4 - 32-bit Kernel with POSIX File System\n");
+        terminal_writestring("Features: German/US keyboard layouts, uppercase support, vim-like editor\n");
         
     } else if (strcmp(cmd, "exit") == 0) {
         terminal_writestring("Halting system...\n");
@@ -784,6 +874,24 @@ void process_command(const char* command) {
             run_editor(arg1);
         }
         
+    } else if (strcmp(cmd, "kbd") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("Current keyboard layout: ");
+            terminal_writestring(use_german_layout ? "German (QWERTZ)" : "US (QWERTY)");
+            terminal_writestring("\n");
+            terminal_writestring("Usage: kbd <de|us>\n");
+        } else if (strcmp(arg1, "de") == 0) {
+            use_german_layout = 1;
+            terminal_writestring("Keyboard layout switched to German (QWERTZ)\n");
+        } else if (strcmp(arg1, "us") == 0) {
+            use_german_layout = 0;
+            terminal_writestring("Keyboard layout switched to US (QWERTY)\n");
+        } else {
+            terminal_writestring("kbd: invalid layout '");
+            terminal_writestring(arg1);
+            terminal_writestring("'. Use 'de' or 'us'\n");
+        }
+        
     } else {
         terminal_writestring("bash: ");
         terminal_writestring(cmd);
@@ -885,7 +993,9 @@ void kernel_main(void) {
     terminal_writestring("  - Keyboard input handling\n");
     terminal_writestring("  - Interrupt system\n");
     terminal_writestring("  - In-memory file system\n");
-    terminal_writestring("  - POSIX-compatible shell commands\n\n");
+    terminal_writestring("  - POSIX-compatible shell commands\n");
+    terminal_writestring("  - Vim-like text editor\n");
+    terminal_writestring("  - German/US keyboard layouts (type 'kbd' for info)\n\n");
     
     // Initialize file system
     fs_init();
@@ -917,6 +1027,7 @@ void run_editor(const char* filename) {
     editor_init(current_editor);
     
     if (filename && strlen(filename) > 0) {
+        strcpy(current_editor->filename, filename);
         editor_open(current_editor, filename);
     } else {
         // Set default filename

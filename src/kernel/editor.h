@@ -34,7 +34,6 @@ typedef struct {
 // Function declarations
 void editor_init(editor_state_t* editor);
 void editor_open(editor_state_t* editor, const char* filename);
-void editor_run(const char* filename);
 void editor_draw(editor_state_t* editor);
 void editor_process_key(editor_state_t* editor, char key, uint8_t scancode);
 void editor_insert_char(editor_state_t* editor, char c);

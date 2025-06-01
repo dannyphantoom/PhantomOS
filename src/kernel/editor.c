@@ -469,25 +469,4 @@ void editor_process_key(editor_state_t* editor, char key, uint8_t scancode) {
             editor->command_buffer[editor->command_length] = '\0';
         }
     }
-}
-
-// Main editor loop
-void editor_run(const char* filename) {
-    editor_state_t editor;
-    editor_init(&editor);
-    
-    if (filename && strlen(filename) > 0) {
-        editor_open(&editor, filename);
-    }
-    
-    // Main editor loop
-    while (editor.mode != -1) {
-        editor_draw(&editor);
-        
-        // Wait for keyboard input
-        asm volatile ("hlt");
-    }
-    
-    // Clear screen and return to shell
-    terminal_clear();
 } 
