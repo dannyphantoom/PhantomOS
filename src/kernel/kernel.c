@@ -50,7 +50,7 @@ struct idt_entry {
     uint8_t zero;
     uint8_t type_attr;
     uint16_t offset_high;
-};
+} __attribute__((packed));
 
 // IDT pointer structure
 struct idt_ptr {
@@ -93,6 +93,18 @@ static inline uint8_t inb(uint16_t port) {
 
 static inline void outb(uint16_t port, uint8_t val) {
     asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline void io_wait(void) {
+    asm volatile ("outb %%al, $0x80" : : "a"(0));
+}
+
+// Enable PS/2 keyboard and start scanning
+static void keyboard_init(void) {
+    io_wait();
+    outb(0x64, 0xAE); // enable first PS/2 port
+    io_wait();
+    outb(0x60, 0xF4); // enable scanning
 }
 
 // Helper function to create VGA entry
@@ -473,8 +485,9 @@ void kernel_main(void) {
     
     // Initialize file system
     fs_init();
-    
-    // Initialize interrupt system
+
+    // Enable keyboard and interrupts
+    keyboard_init();
     init_idt();
     
     // Start the shell
