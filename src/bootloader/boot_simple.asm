@@ -35,9 +35,9 @@ load_kernel:
     mov dl, 0x80    ; Use hard drive instead of floppy
     int 0x13
     
-    ; Load kernel (32 sectors = 16KB to be extra safe)
+    ; Load kernel (64 sectors = 32KB to accommodate larger kernel with editor)
     mov ah, 0x02    ; Read sectors
-    mov al, 32      ; Number of sectors (reduced further)
+    mov al, 64      ; Number of sectors (increased to 64)
     mov ch, 0x00    ; Cylinder 0
     mov cl, 0x02    ; Start from sector 2
     mov dh, 0x00    ; Head 0
@@ -148,10 +148,10 @@ protected_mode_start:
     mov ss, ax
     mov esp, 0x90000  ; Set up stack
     
-    ; Copy kernel to 1MB (copying 32 sectors = 16KB)
+    ; Copy kernel to 1MB (copying 64 sectors = 32KB)
     mov esi, 0x10000  ; Source
     mov edi, 0x100000 ; Destination (1MB)
-    mov ecx, 4096     ; 16KB / 4 = 4096 dwords
+    mov ecx, 8192     ; 32KB / 4 = 8192 dwords
     rep movsd
     
     ; Jump to kernel entry point (accounting for ELF header offset)

@@ -253,4 +253,17 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **Built with ❤️ by a systems programming enthusiast**
 
-*PhantomOS demonstrates that with determination and proper debugging, even the most complex boot issues can be resolved!* 
+*PhantomOS demonstrates that with determination and proper debugging, even the most complex boot issues can be resolved!*
+
+### Recent Updates
+
+- **Vim-like Text Editor**: Added a built-in text editor with vim-like keybindings
+  - Commands: `edit filename` or `vi filename`
+  - Modes: Normal, Insert, and Command modes
+  - Basic vim commands: i, a, o, h/j/k/l, x, dd, :w, :q, :wq
+- **Kernel Size**: The kernel has grown to ~29KB with the editor. The bootloader loads 32KB.
+- **Memory Optimization**: Editor buffer reduced to 50 lines x 76 chars to save space
+
+### What Works
+
+// ... existing code ... 

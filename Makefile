@@ -27,6 +27,7 @@ KERNEL_ASM_OBJ = $(BUILD_DIR)/kernel_entry.o
 KERNEL_INTERRUPTS_OBJ = $(BUILD_DIR)/interrupts.o
 KERNEL_C_OBJ = $(BUILD_DIR)/kernel.o
 KERNEL_FS_OBJ = $(BUILD_DIR)/filesystem.o
+KERNEL_EDITOR_OBJ = $(BUILD_DIR)/editor.o
 
 .PHONY: all clean run usb-image
 
@@ -56,9 +57,13 @@ $(KERNEL_C_OBJ): $(KERNEL_DIR)/kernel.c | $(BUILD_DIR)
 $(KERNEL_FS_OBJ): $(KERNEL_DIR)/filesystem.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# Build editor C code
+$(KERNEL_EDITOR_OBJ): $(KERNEL_DIR)/editor.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
 # Link kernel (full version with file system, 32-bit)
-$(KERNEL): $(KERNEL_ASM_OBJ) $(KERNEL_INTERRUPTS_OBJ) $(KERNEL_C_OBJ) $(KERNEL_FS_OBJ) $(KERNEL_DIR)/linker.ld | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) -o $@ $(KERNEL_ASM_OBJ) $(KERNEL_INTERRUPTS_OBJ) $(KERNEL_C_OBJ) $(KERNEL_FS_OBJ) --oformat binary
+$(KERNEL): $(KERNEL_ASM_OBJ) $(KERNEL_INTERRUPTS_OBJ) $(KERNEL_C_OBJ) $(KERNEL_FS_OBJ) $(KERNEL_EDITOR_OBJ) $(KERNEL_DIR)/linker.ld | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) -o $@ $(KERNEL_ASM_OBJ) $(KERNEL_INTERRUPTS_OBJ) $(KERNEL_C_OBJ) $(KERNEL_FS_OBJ) $(KERNEL_EDITOR_OBJ) --oformat binary
 
 # Create OS image (bootloader + kernel)
 $(OS_IMAGE): $(BOOTLOADER) $(KERNEL) | $(BUILD_DIR)

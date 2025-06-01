@@ -3,14 +3,7 @@
 
 #include "kernel.h"
 #include "filesystem.h"
-
-// Define basic types for freestanding environment (32-bit)
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned int size_t;
-
-#define NULL ((void*)0)
+#include "editor.h"
 
 // VGA text mode constants
 #define VGA_MEMORY 0xB8000
@@ -24,24 +17,6 @@ typedef unsigned int size_t;
 #define KERNEL_CODE_SEGMENT_OFFSET 0x08
 
 // VGA color constants
-typedef enum {
-    VGA_COLOR_BLACK = 0,
-    VGA_COLOR_BLUE = 1,
-    VGA_COLOR_GREEN = 2,
-    VGA_COLOR_CYAN = 3,
-    VGA_COLOR_RED = 4,
-    VGA_COLOR_MAGENTA = 5,
-    VGA_COLOR_BROWN = 6,
-    VGA_COLOR_LIGHT_GREY = 7,
-    VGA_COLOR_DARK_GREY = 8,
-    VGA_COLOR_LIGHT_BLUE = 9,
-    VGA_COLOR_LIGHT_GREEN = 10,
-    VGA_COLOR_LIGHT_CYAN = 11,
-    VGA_COLOR_LIGHT_RED = 12,
-    VGA_COLOR_LIGHT_MAGENTA = 13,
-    VGA_COLOR_LIGHT_BROWN = 14,
-    VGA_COLOR_WHITE = 15,
-} vga_color;
 
 // IDT entry structure (32-bit)
 struct idt_entry {
@@ -63,6 +38,8 @@ void process_command(const char* command);
 void shell_prompt(void);
 int strncmp(const char* str1, const char* str2, size_t n);
 void parse_command_args(const char* command, char* cmd, char* arg1, char* arg2);
+void tree_print_node(fs_node_t* node, int depth, int is_last);
+void run_editor(const char* filename);
 
 // Global variables for terminal state
 static size_t terminal_row;
@@ -75,6 +52,10 @@ static char input_buffer[256];
 static size_t input_length = 0;
 static struct idt_entry idt[IDT_SIZE];
 static struct idt_ptr idt_pointer;
+
+// Editor state
+static int editor_active = 0;
+static editor_state_t* current_editor = NULL;
 
 // US QWERTY scancode to ASCII translation table
 static char scancode_to_ascii[] = {
@@ -157,7 +138,7 @@ static void keyboard_init(void) {
 }
 
 // Helper function to create VGA entry
-static inline uint8_t vga_entry_color(vga_color fg, vga_color bg) {
+uint8_t vga_entry_color(vga_color fg, vga_color bg) {
     return fg | bg << 4;
 }
 
@@ -324,6 +305,28 @@ void idt_set_entry(int num, uint32_t handler, uint16_t selector, uint8_t type_at
 void keyboard_handler(void) {
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
 
+    // If editor is active, redirect input to editor
+    if (editor_active && current_editor) {
+        char ascii = 0;
+        if (!(scancode & 0x80) && scancode < sizeof(scancode_to_ascii)) {
+            ascii = scancode_to_ascii[scancode];
+        }
+        
+        editor_process_key(current_editor, ascii, scancode);
+        
+        // Check if editor wants to exit
+        if (current_editor->mode == -1) {
+            editor_active = 0;
+            current_editor = NULL;
+            terminal_clear();
+            shell_prompt();
+        }
+        
+        outb(0x20, 0x20);  // End of interrupt to PIC
+        return;
+    }
+
+    // Normal shell input processing
     if (!(scancode & 0x80)) {  // Key press only (ignore key release)
         if (scancode < sizeof(scancode_to_ascii) && scancode_to_ascii[scancode] != 0) {
             char ascii = scancode_to_ascii[scancode];
@@ -410,22 +413,39 @@ void process_command(const char* command) {
     parse_command_args(command, cmd, arg1, arg2);
     
     if (strcmp(cmd, "help") == 0) {
-        terminal_writestring("PhantomOS Shell Commands (POSIX-compatible):\n");
-        terminal_writestring("  help       - Show this help message\n");
-        terminal_writestring("  clear      - Clear the screen\n");
-        terminal_writestring("  echo <txt> - Echo text\n");
-        terminal_writestring("  version    - Show OS version\n");
-        terminal_writestring("  exit       - Halt the system\n");
-        terminal_writestring("  pwd        - Print working directory\n");
-        terminal_writestring("  ls [dir]   - List directory contents\n");
-        terminal_writestring("  cd <dir>   - Change directory\n");
-        terminal_writestring("  mkdir <dir>- Make directory\n");
-        terminal_writestring("  rmdir <dir>- Remove empty directory\n");
-        terminal_writestring("  touch <file>- Create file\n");
-        terminal_writestring("  rm <file>  - Remove file\n");
-        terminal_writestring("  cp <s> <d> - Copy file\n");
-        terminal_writestring("  mv <s> <d> - Move/rename file\n");
-        terminal_writestring("  cat <file> - Display file contents\n");
+        terminal_writestring("PhantomOS Shell Commands (POSIX-compatible):\n\n");
+        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+        terminal_writestring("Basic Commands:\n");
+        terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        terminal_writestring("  help         - Show this help message\n");
+        terminal_writestring("  clear        - Clear the screen\n");
+        terminal_writestring("  echo <text>  - Echo text to the screen\n");
+        terminal_writestring("  version      - Show OS version\n");
+        terminal_writestring("  exit         - Halt the system\n\n");
+        
+        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+        terminal_writestring("File System Commands:\n");
+        terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        terminal_writestring("  pwd          - Print working directory\n");
+        terminal_writestring("  ls [dir]     - List directory contents\n");
+        terminal_writestring("  cd <dir>     - Change directory\n");
+        terminal_writestring("  mkdir <dir>  - Make directory\n");
+        terminal_writestring("  rmdir <dir>  - Remove empty directory\n");
+        terminal_writestring("  stat <file>  - Show file information\n\n");
+        
+        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+        terminal_writestring("File Operations:\n");
+        terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        terminal_writestring("  touch <file> - Create empty file\n");
+        terminal_writestring("  rm <file>    - Remove file\n");
+        terminal_writestring("  cp <s> <d>   - Copy file\n");
+        terminal_writestring("  mv <s> <d>   - Move/rename file\n");
+        terminal_writestring("  cat <file>   - Display file contents\n");
+        terminal_writestring("  write <file> <text> - Write text to file\n");
+        terminal_writestring("  stat <file>  - Show file information\n");
+        terminal_writestring("  tree [dir]   - Show directory tree\n");
+        terminal_writestring("  edit <file>  - Edit file in text editor\n");
+        terminal_writestring("  vi <file>    - Edit file (alias for edit)\n");
         
     } else if (strcmp(cmd, "clear") == 0) {
         terminal_clear();
@@ -452,6 +472,318 @@ void process_command(const char* command) {
         }
         terminal_writestring("\n");
         
+    } else if (strcmp(cmd, "ls") == 0) {
+        fs_node_t* dir;
+        if (strlen(arg1) > 0) {
+            dir = fs_resolve_path(arg1);
+            if (!dir || dir->type != FILE_TYPE_DIRECTORY) {
+                terminal_writestring("ls: cannot access '");
+                terminal_writestring(arg1);
+                terminal_writestring("': No such directory\n");
+                return;
+            }
+        } else {
+            dir = fs_get_current_dir();
+        }
+        
+        // List directory contents
+        for (size_t i = 0; i < dir->child_count; i++) {
+            fs_node_t* child = dir->children[i];
+            if (child->type == FILE_TYPE_DIRECTORY) {
+                terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+                terminal_writestring(child->name);
+                terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+            } else {
+                terminal_writestring(child->name);
+            }
+            terminal_writestring(" ");
+        }
+        if (dir->child_count > 0) {
+            terminal_writestring("\n");
+        }
+        
+    } else if (strcmp(cmd, "cd") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("cd: missing operand\n");
+        } else {
+            if (strcmp(arg1, "/") == 0) {
+                // Go to root
+                fs_change_directory("/");
+            } else if (strcmp(arg1, "..") == 0) {
+                // Go to parent directory
+                fs_node_t* current = fs_get_current_dir();
+                if (current->parent) {
+                    fs_change_directory("..");
+                }
+            } else if (strcmp(arg1, ".") == 0) {
+                // Stay in current directory - do nothing
+            } else {
+                if (fs_change_directory(arg1) != 0) {
+                    terminal_writestring("cd: ");
+                    terminal_writestring(arg1);
+                    terminal_writestring(": No such directory\n");
+                }
+            }
+        }
+        
+    } else if (strcmp(cmd, "mkdir") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("mkdir: missing operand\n");
+        } else {
+            fs_node_t* parent = fs_get_current_dir();
+            fs_node_t* existing = fs_find_child(parent, arg1);
+            if (existing) {
+                terminal_writestring("mkdir: cannot create directory '");
+                terminal_writestring(arg1);
+                terminal_writestring("': File exists\n");
+            } else {
+                fs_node_t* new_dir = fs_create_file(arg1, FILE_TYPE_DIRECTORY);
+                if (new_dir && fs_add_child(parent, new_dir) == 0) {
+                    // Success - no output
+                } else {
+                    terminal_writestring("mkdir: cannot create directory\n");
+                }
+            }
+        }
+        
+    } else if (strcmp(cmd, "rmdir") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("rmdir: missing operand\n");
+        } else {
+            fs_node_t* node = fs_resolve_path(arg1);
+            if (!node) {
+                terminal_writestring("rmdir: failed to remove '");
+                terminal_writestring(arg1);
+                terminal_writestring("': No such file or directory\n");
+            } else if (node->type != FILE_TYPE_DIRECTORY) {
+                terminal_writestring("rmdir: failed to remove '");
+                terminal_writestring(arg1);
+                terminal_writestring("': Not a directory\n");
+            } else if (node->child_count > 0) {
+                terminal_writestring("rmdir: failed to remove '");
+                terminal_writestring(arg1);
+                terminal_writestring("': Directory not empty\n");
+            } else {
+                fs_remove_child(node->parent, node->name);
+                fs_delete_node(node);
+            }
+        }
+        
+    } else if (strcmp(cmd, "touch") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("touch: missing file operand\n");
+        } else {
+            fs_node_t* parent = fs_get_current_dir();
+            fs_node_t* existing = fs_find_child(parent, arg1);
+            if (!existing) {
+                fs_node_t* new_file = fs_create_file(arg1, FILE_TYPE_REGULAR);
+                if (new_file && fs_add_child(parent, new_file) == 0) {
+                    // Success - no output
+                } else {
+                    terminal_writestring("touch: cannot create file\n");
+                }
+            }
+            // If file exists, touch just updates timestamp (not implemented)
+        }
+        
+    } else if (strcmp(cmd, "rm") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("rm: missing operand\n");
+        } else {
+            fs_node_t* node = fs_resolve_path(arg1);
+            if (!node) {
+                terminal_writestring("rm: cannot remove '");
+                terminal_writestring(arg1);
+                terminal_writestring("': No such file or directory\n");
+            } else if (node->type == FILE_TYPE_DIRECTORY) {
+                terminal_writestring("rm: cannot remove '");
+                terminal_writestring(arg1);
+                terminal_writestring("': Is a directory\n");
+            } else {
+                fs_remove_child(node->parent, node->name);
+                fs_delete_node(node);
+            }
+        }
+        
+    } else if (strcmp(cmd, "cp") == 0) {
+        if (strlen(arg1) == 0 || strlen(arg2) == 0) {
+            terminal_writestring("cp: missing file operand\n");
+        } else {
+            if (fs_copy_file(arg1, arg2) != 0) {
+                terminal_writestring("cp: cannot copy file\n");
+            }
+        }
+        
+    } else if (strcmp(cmd, "mv") == 0) {
+        if (strlen(arg1) == 0 || strlen(arg2) == 0) {
+            terminal_writestring("mv: missing file operand\n");
+        } else {
+            if (fs_move_file(arg1, arg2) != 0) {
+                terminal_writestring("mv: cannot move file\n");
+            }
+        }
+        
+    } else if (strcmp(cmd, "cat") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("cat: missing file operand\n");
+        } else {
+            fs_node_t* node = fs_resolve_path(arg1);
+            if (!node) {
+                terminal_writestring("cat: ");
+                terminal_writestring(arg1);
+                terminal_writestring(": No such file or directory\n");
+            } else if (node->type == FILE_TYPE_DIRECTORY) {
+                terminal_writestring("cat: ");
+                terminal_writestring(arg1);
+                terminal_writestring(": Is a directory\n");
+            } else {
+                char* content = fs_read_file(node);
+                if (content) {
+                    terminal_writestring(content);
+                    if (strlen(content) == 0 || content[strlen(content)-1] != '\n') {
+                        terminal_writestring("\n");
+                    }
+                } else {
+                    // Empty file
+                }
+            }
+        }
+        
+    } else if (strcmp(cmd, "write") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("write: missing file operand\n");
+        } else if (strlen(arg2) == 0) {
+            terminal_writestring("write: missing text operand\n");
+        } else {
+            fs_node_t* node = fs_resolve_path(arg1);
+            if (!node) {
+                // Create the file if it doesn't exist
+                fs_node_t* parent = fs_get_current_dir();
+                node = fs_create_file(arg1, FILE_TYPE_REGULAR);
+                if (node && fs_add_child(parent, node) != 0) {
+                    terminal_writestring("write: cannot create file\n");
+                    fs_delete_node(node);
+                    node = NULL;
+                }
+            }
+            
+            if (node) {
+                if (node->type == FILE_TYPE_DIRECTORY) {
+                    terminal_writestring("write: ");
+                    terminal_writestring(arg1);
+                    terminal_writestring(": Is a directory\n");
+                } else {
+                    if (fs_write_file(node, arg2, strlen(arg2)) == 0) {
+                        // Success - no output
+                    } else {
+                        terminal_writestring("write: cannot write to file\n");
+                    }
+                }
+            }
+        }
+        
+    } else if (strcmp(cmd, "stat") == 0) {
+        if (strlen(arg1) == 0) {
+            terminal_writestring("stat: missing file operand\n");
+        } else {
+            fs_node_t* node = fs_resolve_path(arg1);
+            if (!node) {
+                terminal_writestring("stat: cannot stat '");
+                terminal_writestring(arg1);
+                terminal_writestring("': No such file or directory\n");
+            } else {
+                terminal_writestring("  File: ");
+                terminal_writestring(node->name);
+                terminal_writestring("\n");
+                terminal_writestring("  Type: ");
+                if (node->type == FILE_TYPE_DIRECTORY) {
+                    terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+                    terminal_writestring("directory");
+                } else {
+                    terminal_writestring("regular file");
+                }
+                terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+                terminal_writestring("\n");
+                
+                if (node->type == FILE_TYPE_REGULAR) {
+                    terminal_writestring("  Size: ");
+                    // Convert size to string (simple implementation)
+                    char size_str[32];
+                    size_t size = node->size;
+                    int i = 0;
+                    if (size == 0) {
+                        size_str[i++] = '0';
+                    } else {
+                        char temp[32];
+                        int j = 0;
+                        while (size > 0) {
+                            temp[j++] = '0' + (size % 10);
+                            size /= 10;
+                        }
+                        while (j > 0) {
+                            size_str[i++] = temp[--j];
+                        }
+                    }
+                    size_str[i] = '\0';
+                    terminal_writestring(size_str);
+                    terminal_writestring(" bytes\n");
+                } else if (node->type == FILE_TYPE_DIRECTORY) {
+                    terminal_writestring("  Contents: ");
+                    char count_str[32];
+                    size_t count = node->child_count;
+                    int i = 0;
+                    if (count == 0) {
+                        count_str[i++] = '0';
+                    } else {
+                        char temp[32];
+                        int j = 0;
+                        while (count > 0) {
+                            temp[j++] = '0' + (count % 10);
+                            count /= 10;
+                        }
+                        while (j > 0) {
+                            count_str[i++] = temp[--j];
+                        }
+                    }
+                    count_str[i] = '\0';
+                    terminal_writestring(count_str);
+                    terminal_writestring(" items\n");
+                }
+            }
+        }
+        
+    } else if (strcmp(cmd, "tree") == 0) {
+        fs_node_t* dir;
+        if (strlen(arg1) > 0) {
+            dir = fs_resolve_path(arg1);
+            if (!dir || dir->type != FILE_TYPE_DIRECTORY) {
+                terminal_writestring("tree: ");
+                terminal_writestring(arg1);
+                terminal_writestring(": Not a directory\n");
+                return;
+            }
+        } else {
+            dir = fs_get_current_dir();
+        }
+        
+        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+        terminal_writestring(dir->name);
+        terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+        terminal_writestring("\n");
+        
+        for (size_t i = 0; i < dir->child_count; i++) {
+            tree_print_node(dir->children[i], 0, i == dir->child_count - 1);
+        }
+        
+    } else if (strcmp(cmd, "edit") == 0 || strcmp(cmd, "vi") == 0) {
+        if (strlen(arg1) == 0) {
+            // Open editor with no file
+            run_editor("");
+        } else {
+            // Open editor with specified file
+            run_editor(arg1);
+        }
+        
     } else {
         terminal_writestring("bash: ");
         terminal_writestring(cmd);
@@ -459,8 +791,37 @@ void process_command(const char* command) {
     }
 }
 
+// Helper function to print tree structure
+void tree_print_node(fs_node_t* node, int depth, int is_last) {
+    // Print indentation
+    for (int i = 0; i < depth; i++) {
+        terminal_writestring("  ");
+    }
+    
+    // Print tree branch
+    if (depth > 0) {
+        terminal_writestring(is_last ? "`-- " : "|-- ");
+    }
+    
+    // Print node name with color
+    if (node->type == FILE_TYPE_DIRECTORY) {
+        terminal_setcolor(vga_entry_color(VGA_COLOR_LIGHT_BLUE, VGA_COLOR_BLACK));
+        terminal_writestring(node->name);
+        terminal_setcolor(vga_entry_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK));
+    } else {
+        terminal_writestring(node->name);
+    }
+    terminal_writestring("\n");
+    
+    // Recursively print children for directories
+    if (node->type == FILE_TYPE_DIRECTORY) {
+        for (size_t i = 0; i < node->child_count; i++) {
+            tree_print_node(node->children[i], depth + 1, i == node->child_count - 1);
+        }
+    }
+}
+
 void init_idt(void) {
-    terminal_putchar('I'); // Debug: show IDT setup started
     // Remap PIC
     outb(0x20, 0x11);
     outb(0xA0, 0x11);
@@ -482,19 +843,14 @@ void init_idt(void) {
     idt_pointer.limit = sizeof(idt) - 1;
     idt_pointer.base = (uint32_t)&idt;
     asm volatile ("lidt %0" : : "m"(idt_pointer));
-    terminal_putchar('L'); // Debug: show IDT loaded
 
     uint8_t m = inb(0x21);
     char* vga = (char*)0xB8000;
-    vga[4] = '0' + ((m & (1 << 1)) ? 1 : 0);  // Show IRQ1 masked/unmasked
     vga[5] = 0x0F;
 
     // Enable interrupts
     asm volatile ("sti");
-    terminal_putchar('S'); // Debug: show STI (interrupts enabled)
 
-    vga[0] = 'S';
-    vga[1] = 0x0F;
 }
 
 // Basic shell prompt with current directory
@@ -512,8 +868,6 @@ void shell_prompt(void) {
 // Main kernel entry point
 void kernel_main(void) {
     char* video = (char*)0xB8000;
-    video[0] = 'Z';
-    video[1] = 0x0F;
   
 
 
@@ -552,4 +906,23 @@ void kernel_main(void) {
     while (1) {
         asm volatile ("hlt"); // Halt until next interrupt
     }
+}
+
+// Wrapper function to run the editor
+void run_editor(const char* filename) {
+    static editor_state_t editor;
+    current_editor = &editor;
+    editor_active = 1;
+    
+    editor_init(current_editor);
+    
+    if (filename && strlen(filename) > 0) {
+        editor_open(current_editor, filename);
+    } else {
+        // Set default filename
+        strcpy(current_editor->filename, "untitled.txt");
+    }
+    
+    // Initial draw
+    editor_draw(current_editor);
 } 
