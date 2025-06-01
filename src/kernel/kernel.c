@@ -105,6 +105,7 @@ static void keyboard_init(void) {
     outb(0x64, 0xAE); // enable first PS/2 port
     io_wait();
     outb(0x60, 0xF4); // enable scanning
+    io_wait();       // wait for command to complete
 }
 
 // Helper function to create VGA entry
