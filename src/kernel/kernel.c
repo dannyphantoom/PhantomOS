@@ -50,7 +50,7 @@ struct idt_entry {
     uint8_t zero;
     uint8_t type_attr;
     uint16_t offset_high;
-};
+} __attribute__((packed));
 
 // IDT pointer structure
 struct idt_ptr {
@@ -93,6 +93,50 @@ static inline uint8_t inb(uint16_t port) {
 
 static inline void outb(uint16_t port, uint8_t val) {
     asm volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+
+static inline void io_wait(void) {
+    asm volatile ("outb %%al, $0x80" : : "a"(0));
+}
+
+// Wait until PS/2 controller is ready for writing
+static void ps2_wait_write(void) {
+    while (inb(0x64) & 0x02) {
+    }
+}
+
+// Wait until PS/2 controller has data to read
+static void ps2_wait_read(void) {
+    while (!(inb(0x64) & 0x01)) {
+    }
+}
+
+// Robust PS/2 keyboard initialization
+static void keyboard_init(void) {
+    ps2_wait_write();
+    outb(0x64, 0xAD); // disable first port
+    ps2_wait_write();
+    outb(0x64, 0xA7); // disable second port
+
+    ps2_wait_read();
+    (void)inb(0x60); // flush output buffer
+
+    ps2_wait_write();
+    outb(0x64, 0x20); // read command byte
+    ps2_wait_read();
+    uint8_t cmd = inb(0x60);
+    cmd |= 0x01;    // enable IRQ1
+    cmd &= ~0x10;   // enable port 1 clock
+
+    ps2_wait_write();
+    outb(0x64, 0x60); // write command byte
+    ps2_wait_write();
+    outb(0x60, cmd);
+
+    ps2_wait_write();
+    outb(0x64, 0xAE); // enable first port
+    ps2_wait_write();
+    outb(0x60, 0xF4); // enable scanning
 }
 
 // Helper function to create VGA entry
@@ -398,6 +442,8 @@ void process_command(const char* command) {
     }
 }
 void init_idt(void) {
+    // Clear IDT table
+    memset(idt, 0, sizeof(idt));
     // Remap PIC
     outb(0x20, 0x11);
     outb(0xA0, 0x11);
@@ -419,18 +465,8 @@ void init_idt(void) {
     idt_pointer.base = (uint32_t)&idt;
     asm volatile ("lidt %0" : : "m"(idt_pointer));
 
-	uint8_t m = inb(0x21);
-	char* vga = (char*)0xB8000;
-	vga[4] = '0' + ((m & (1 << 1)) ? 1 : 0);  // Show IRQ1 masked/unmasked
-	vga[5] = 0x0F;
-
     // Enable interrupts
     asm volatile ("sti");
-	
-	//dummy 
-
-	vga[0] = 'S';
-	vga[1] = 0x0F;
 
 }
 
@@ -449,12 +485,6 @@ void shell_prompt(void) {
 
 // Main kernel entry point
 void kernel_main(void) {
-    char* video = (char*)0xB8000;
-    video[0] = 'Z';
-    video[1] = 0x0F;
-  
-
-
     // Initialize the terminal
     terminal_initialize();
     
@@ -473,8 +503,9 @@ void kernel_main(void) {
     
     // Initialize file system
     fs_init();
-    
-    // Initialize interrupt system
+
+    // Enable keyboard and interrupts
+    keyboard_init();
     init_idt();
     
     // Start the shell
